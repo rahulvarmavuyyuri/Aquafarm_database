@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a2e45">
+  <!-- Lets you add AquaFarm to the iPad Home Screen as an app -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="AquaFarm">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>AquaFarm – Management System</title>
+  <!-- All the design is in style.css and all the behaviour is in script.js -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <div class="app">
+
+    <!-- Side menu. On small screens it slides in when you tap the ☰ button. -->
+    <aside class="sidebar" id="sidebar" aria-label="Main menu">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🌊</span>
+        <span class="brand-name">AquaFarm</span>
+      </div>
+      <nav class="nav" aria-label="Main">
+        <a href="#/dashboard" data-route="dashboard"><span aria-hidden="true">📊</span> Dashboard</a>
+        <a href="#/tanks" data-route="tanks"><span aria-hidden="true">🛢️</span> Tank Master</a>
+        <a href="#/stocking" data-route="stocking"><span aria-hidden="true">🌱</span> Seed Stocking</a>
+        <a href="#/medication" data-route="medication"><span aria-hidden="true">💊</span> Medication / Chemicals</a>
+        <a href="#/feed" data-route="feed"><span aria-hidden="true">🍽️</span> Feed Management</a>
+        <a href="#/water" data-route="water"><span aria-hidden="true">💧</span> Water Quality</a>
+        <a href="#/mortality" data-route="mortality"><span aria-hidden="true">⚠️</span> Mortality</a>
+        <a href="#/harvest" data-route="harvest"><span aria-hidden="true">🎣</span> Harvest</a>
+        <a href="#/reports" data-route="reports"><span aria-hidden="true">📑</span> Reports</a>
+        <a href="#/backup" data-route="backup"><span aria-hidden="true">💾</span> Data Backup</a>
+      </nav>
+      <div class="theme-switch" role="group" aria-label="Colour theme">
+        <span class="theme-label">Theme</span>
+        <div class="theme-buttons">
+          <button type="button" data-action="theme" data-mode="auto" data-theme-choice="auto" aria-pressed="true">Auto</button>
+          <button type="button" data-action="theme" data-mode="light" data-theme-choice="light" aria-pressed="false">Light</button>
+          <button type="button" data-action="theme" data-mode="dark" data-theme-choice="dark" aria-pressed="false">Dark</button>
+        </div>
+      </div>
+      <p class="sidebar-note">Records are saved in this browser only. Download a backup regularly.</p>
+    </aside>
+
+    <div class="nav-overlay" data-action="nav-close"></div>
+
+    <div class="content">
+      <header class="topbar">
+        <button type="button" class="icon-btn menu-btn" data-action="nav-toggle" aria-label="Open or close menu" aria-expanded="false" aria-controls="sidebar">☰</button>
+        <span class="topbar-title">AquaFarm</span>
+      </header>
+
+      <main id="main" tabindex="-1">
+        <!-- script.js draws each page here -->
+        <div id="view"></div>
+        <noscript><p class="notice error">AquaFarm needs JavaScript. Please turn it on in your browser settings.</p></noscript>
+      </main>
+    </div>
+  </div>
+
+  <!-- Pop-up windows (forms, confirmations) appear here -->
+  <div id="modal-root"></div>
+  <!-- Success and error messages appear here -->
+  <div id="toasts" aria-live="polite"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
