@@ -3,8 +3,8 @@
    then replace the four PASTE_... values below with your own Firebase web-app settings.
    Leave them as they are to keep using AquaFarm on one device only. */
 window.AQUAFARM_FIREBASE = {
-  apiKey: "PASTE_API_KEY_HERE",
-  authDomain: "PASTE_PROJECT_ID_HERE.firebaseapp.com",
-  projectId: "PASTE_PROJECT_ID_HERE",
-  appId: "PASTE_APP_ID_HERE"
+  apiKey: "AIzaSyAj4_HgplZ4xkINZp9ZIvIZw0ImFseLnOI",
+  authDomain: "aquafarm-271de.firebaseapp.com",
+  projectId: "aquafarm-271de",
+  appId: "1:797034486516:web:4b4be523fd0f78ce425ca1"
 };
