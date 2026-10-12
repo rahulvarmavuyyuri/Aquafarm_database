@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Only people whose email is listed in admin/members may read or change farm records.
+    function isMember() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() in get(/databases/$(database)/documents/admin/members).data.emails;
+    }
+
+    match /farm/{docId} {
+      allow read, write: if isMember();
+    }
+
+    // Everything else is closed.
+    match /{other=**} {
+      allow read, write: if false;
+    }
+  }
+}

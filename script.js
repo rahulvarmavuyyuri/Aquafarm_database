@@ -151,11 +151,13 @@ let DB = loadDB();
 /* Save everything. Returns true if it worked. */
 function saveDB() {
   if (!storageWorks) {
+    if (SYNC.db) { schedulePush(); return true; }
     toast('This browser is not allowing saving, so changes will be lost when you close the page. Download a backup.', 'error');
     return false;
   }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
+    schedulePush();
     return true;
   } catch (e) {
     toast('Could not save. Browser storage may be full or blocked. Download a backup now.', 'error');
@@ -1870,9 +1872,7 @@ function pageBackup(el) {
   const last = DB.meta.lastBackup ? new Date(DB.meta.lastBackup).toLocaleString() : 'Never';
   const hasDemo = DB.tanks.some(function (t) { return t.demo; });
   el.innerHTML = '<div class="page-head"><div><h1 id="page-title" tabindex="-1">💾 Data Backup</h1><p class="lead">Download, restore and manage your saved records.</p></div></div>' +
-    '<div class="notice warn"><strong>Please read:</strong> this version saves records only in this browser, on this device (browser storage called localStorage). ' +
-    'It is not a shared database, it does not sync between devices, and it does not support several users. Records can be lost if you clear website data, use Private Browsing, or switch browser or device. ' +
-    'Download a backup regularly.</div>' +
+    storageNotice() +
     '<section class="card"><h2>What is saved here</h2><div class="table-wrap"><table><thead><tr><th scope="col">Records</th><th scope="col" class="num">Count</th></tr></thead><tbody>' +
     COLLECTIONS.map(function (k) { return '<tr><td>' + esc(MODS[k].title) + '</td><td class="num">' + fmt(DB[k].length, 0) + '</td></tr>'; }).join('') +
     '</tbody></table></div><p class="muted small">Approximate size: ' + kb + ' KB · Last backup downloaded: ' + esc(last) + '</p></section>' +
@@ -1885,6 +1885,13 @@ function pageBackup(el) {
     '<div class="field"><label for="bk-file">Backup file (.json)</label><input type="file" id="bk-file" accept=".json,application/json"></div>' +
     '<div class="field"><label for="bk-paste">Or paste backup text</label><textarea id="bk-paste" rows="4" placeholder="Paste the backup text here"></textarea></div>' +
     '<div class="form-actions left"><button type="button" class="btn btn-primary" id="bk-restore">Check and restore</button></div></section>' +
+    '<section class="card"><h2>Sync between devices</h2><p id="sync-detail">' + (SYNC.db
+      ? 'Status: <strong>' + esc(SYNC.state === 'synced' ? 'connected and synced' : SYNC.state === 'saving' ? 'connecting or saving…' : 'connected, with a problem') + '</strong>. The shared database holds ' + fmt(SYNC.remote.size, 0) + ' group(s) of records.'
+      : (firebaseConfigured()
+        ? 'Status: <strong>not connected</strong>. Open the menu and tap <strong>Sign in to sync</strong>.'
+        : 'Status: <strong>not connected</strong>. To share records, either open AquaFarm from your Claude link while signed in to Claude, or set up Firebase (see FIREBASE-SETUP.md). This copy saves on this device only.')) + '</p>' +
+    '<div class="form-actions left"><button type="button" class="btn" id="bk-sync-up"' + (SYNC.db ? '' : ' disabled') + '>Upload this device’s records now</button>' +
+    '<button type="button" class="btn" id="bk-sync-down"' + (SYNC.db ? '' : ' disabled') + '>Load shared records onto this device</button></div></section>' +
     '<section class="card"><h2>Optional demo data</h2><p>Add two clearly labelled demo tanks (DEMO-01 and DEMO-02) with sample records, so you can try every page. ' +
     'Demo data is not real. Remove it before real record keeping.</p><div class="form-actions left">' +
     '<button type="button" class="btn" id="bk-demo">Load demo data</button>' + (hasDemo ? '<button type="button" class="btn" id="bk-demo-remove">Remove demo data</button>' : '') + '</div></section>' +
@@ -1920,6 +1927,22 @@ function pageBackup(el) {
     } else {
       toast('Choose a backup file or paste backup text first.', 'warn');
     }
+  });
+  $('#bk-sync-up', el).addEventListener('click', async function () {
+    const ok = await confirmDialog({ title: 'Upload this device’s records?', message: 'The shared database will be made to match the records on this device. Records that exist only in the shared database will be deleted.', confirmText: 'Upload', danger: true });
+    if (!ok) return;
+    SYNC.ready = true;
+    await pushNow();
+    toast(SYNC.state === 'synced' ? 'Uploaded. Other devices will now show these records.' : 'Upload did not finish. See the message above.', SYNC.state === 'synced' ? 'ok' : 'error');
+    render({ keep: true });
+  });
+  $('#bk-sync-down', el).addEventListener('click', async function () {
+    if (!SYNC.remote.size) { toast('The shared database is empty, so there is nothing to load.', 'warn'); return; }
+    const ok = await confirmDialog({ title: 'Load shared records?', message: 'Records on this device will be replaced by the records in the shared database.', confirmText: 'Load shared records', danger: true });
+    if (!ok) return;
+    SYNC.ready = true;
+    applyRemote(SYNC.remote);
+    toast('Shared records loaded onto this device.');
   });
   $('#bk-demo', el).addEventListener('click', loadDemoData);
   if (hasDemo) $('#bk-demo-remove', el).addEventListener('click', removeDemoData);
@@ -2024,6 +2047,8 @@ document.addEventListener('click', function (e) {
     case 'nav-toggle': if (document.body.classList.contains('nav-open')) closeNav(); else openNav(); break;
     case 'nav-close': closeNav(); break;
     case 'theme': setTheme(t.dataset.mode); break;
+    case 'fb-login': showLogin(); break;
+    case 'fb-signout': signOutFirebase(); break;
     case 'add': openRecordForm(mod, null, t.dataset.tank ? { tankId: t.dataset.tank } : {}); break;
     case 'view': viewRecord(mod, id); break;
     case 'edit': openRecordForm(mod, id); break;
@@ -2036,9 +2061,317 @@ document.addEventListener('click', function (e) {
 
 window.addEventListener('hashchange', function () { closeModal(); closeNav(); render(); });
 
+/* =====================================================================
+   13. SYNC (shared database)
+   When this page is opened from its Claude link, records are also kept in a
+   shared database, so every device you sign in on sees the same data.
+   Anywhere else (a normal website, an online editor) this stays switched
+   off and records are saved on this device only.
+   Records are grouped into small "shards" (one per table, tank and month)
+   so each stored document stays well under the size limit.
+   ===================================================================== */
+const SYNC = { unsub: null, db: null, ready: false, pushing: false, again: false, pushTimer: null, remote: new Map(), state: 'off' };
+
+function setSyncStatus(state, text) {
+  SYNC.state = state;
+  const el = document.getElementById('sync-status');
+  if (el) { el.textContent = text; el.setAttribute('data-state', state); }
+}
+
+function storageNotice() {
+  if (SYNC.db && FB.user) {
+    return '<div class="notice"><strong>Sync is on</strong> (signed in as ' + esc(FB.user.email) + '). Your records are kept in the shared online database and also on this device. Everyone on the farm’s member list sees the same records and can change them. A backup is still a good idea.</div>';
+  }
+  if (SYNC.db) {
+    return '<div class="notice"><strong>Sync is on.</strong> Your records are kept in the shared AquaFarm database and also on this device, so they appear on every device where you open this page signed in to Claude. Only you, and people you invite as editors, can change them. A backup is still a good idea.</div>';
+  }
+  return '<div class="notice warn"><strong>Please read:</strong> this version saves records only in this browser, on this device (browser storage called localStorage). ' +
+    'It is not a shared database, it does not sync between devices, and it does not support several users. Records can be lost if you clear website data, use Private Browsing, or switch browser or device. ' +
+    'Download a backup regularly.</div>';
+}
+
+/* Same text every time, whatever order the keys came back in. */
+function canon(v) {
+  if (Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(function (k) { return JSON.stringify(k) + ':' + canon(v[k]); }).join(',') + '}';
+  return JSON.stringify(v);
+}
+
+/* Split all records into shards: id -> text. Empty groups are left out. */
+function shardsOf(data) {
+  const groups = new Map();
+  COLLECTIONS.forEach(function (c) {
+    (data[c] || []).forEach(function (r) {
+      const id = c === 'tanks' ? 'tanks' : c + ':' + r.tankId + ':' + String(r.date || r.dateTime || 'none').slice(0, 7);
+      if (!groups.has(id)) groups.set(id, { c: c, items: [] });
+      groups.get(id).items.push(r);
+    });
+  });
+  const out = new Map();
+  groups.forEach(function (g, id) { out.set(id, canon(g)); });
+  const L = data.settings && data.settings.limits;
+  if (L && (Object.keys(L.Shrimp || {}).length || Object.keys(L.Fish || {}).length)) out.set('settings', canon({ c: 'settings', limits: L }));
+  return out;
+}
+
+function sameShards(a, b) {
+  if (a.size !== b.size) return false;
+  let same = true;
+  a.forEach(function (v, k) { if (b.get(k) !== v) same = false; });
+  return same;
+}
+
+function dbFromShards(remote) {
+  const db = emptyDB();
+  remote.forEach(function (json) {
+    const d = JSON.parse(json);
+    if (d.c === 'settings' && d.limits) db.settings.limits = { Shrimp: d.limits.Shrimp || {}, Fish: d.limits.Fish || {} };
+    else if (COLLECTIONS.indexOf(d.c) !== -1 && Array.isArray(d.items)) db[d.c] = db[d.c].concat(d.items);
+  });
+  db.meta = DB.meta;
+  return db;
+}
+
+/* Save changes to the shared database a moment after the last edit. */
+function schedulePush() {
+  if (!SYNC.db || !SYNC.ready) return;
+  setSyncStatus('saving', '☁️ Saving…');
+  clearTimeout(SYNC.pushTimer);
+  SYNC.pushTimer = setTimeout(pushNow, 500);
+}
+
+async function pushNow() {
+  SYNC.pushTimer = null;
+  if (SYNC.pushing) { SYNC.again = true; return; }
+  SYNC.pushing = true;
+  try {
+    do {
+      SYNC.again = false;
+      const local = shardsOf(DB);
+      const col = SYNC.db.collection('farm');
+      for (const entry of Array.from(local.entries())) {
+        if (SYNC.remote.get(entry[0]) !== entry[1]) { await col.doc(entry[0]).set(JSON.parse(entry[1])); SYNC.remote.set(entry[0], entry[1]); }
+      }
+      for (const id of Array.from(SYNC.remote.keys())) {
+        if (!local.has(id)) { await col.doc(id).delete(); SYNC.remote.delete(id); }
+      }
+    } while (SYNC.again);
+    setSyncStatus('synced', '☁️ Synced');
+  } catch (e) {
+    setSyncStatus('error', '⚠️ Not synced');
+    toast(e && e.code === 'quota_exceeded'
+      ? 'The shared database is full, so the latest change is saved on this device only. Download a backup.'
+      : 'Could not reach the shared database. Your change is saved on this device and will sync on the next save.', 'error');
+  } finally {
+    SYNC.pushing = false;
+  }
+}
+
+function applyRemote(remote) {
+  DB = dbFromShards(remote);
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(DB)); } catch (e) { /* ignore */ }
+  render({ keep: true });
+}
+
+async function firstSync(remote) {
+  const local = shardsOf(DB);
+  SYNC.remote = remote;
+  if (remote.size === 0 && local.size > 0) {
+    SYNC.ready = true;
+    await pushNow();
+    toast('Your records from this device were uploaded to the shared database.');
+  } else if (remote.size > 0 && local.size === 0) {
+    SYNC.ready = true;
+    applyRemote(remote);
+    setSyncStatus('synced', '☁️ Synced');
+  } else if (remote.size > 0 && !sameShards(local, remote)) {
+    const useShared = await confirmDialog({
+      title: 'Two different sets of records found',
+      message: 'The shared database already has records, and this device has different records.\n\nUse the shared records? Records on this device will be replaced.',
+      confirmText: 'Use shared records'
+    });
+    if (useShared) {
+      SYNC.ready = true;
+      applyRemote(remote);
+      setSyncStatus('synced', '☁️ Synced');
+    } else {
+      const overwrite = await confirmDialog({
+        title: 'Replace the shared records?',
+        message: 'This will delete the shared records and replace them with the records on this device.',
+        confirmText: 'Replace shared records', danger: true
+      });
+      if (overwrite) { SYNC.ready = true; await pushNow(); }
+      else { SYNC.db = null; setSyncStatus('off', '💾 Sync paused – saved on this device only'); }
+    }
+  } else {
+    SYNC.ready = true;
+    setSyncStatus('synced', '☁️ Synced');
+  }
+}
+
+function onRemote(snap) {
+  const remote = new Map();
+  snap.docs.forEach(function (d) { if (d.exists) remote.set(d.id, canon(d.data())); });
+  if (!SYNC.ready) {
+    if (snap.metadata.fromCache) return;   // wait for the definitive answer from the server
+    if (SYNC.starting) return;
+    SYNC.starting = true;
+    firstSync(remote).then(function () { SYNC.starting = false; });
+    return;
+  }
+  if (snap.metadata.hasPendingWrites || SYNC.pushing || SYNC.pushTimer) return;   // our own change is still being saved
+  SYNC.remote = remote;
+  if (!sameShards(shardsOf(DB), remote)) applyRemote(remote);
+  setSyncStatus('synced', '☁️ Synced');
+}
+
+function startSync() {
+  if (typeof window === 'undefined' || !window.claude || typeof window.claude.use !== 'function') {
+    if (firebaseConfigured()) { startFirebase(); return; }
+    setSyncStatus('off', '💾 Saved on this device only');
+    return;
+  }
+  setSyncStatus('saving', '☁️ Connecting…');
+  window.claude.use('db').then(function (db) {
+    if (!db) { setSyncStatus('error', '⚠️ Sync unavailable. Sign in to Claude and open your Claude link.'); return; }
+    SYNC.db = db;
+    SYNC.unsub = db.collection('farm').onSnapshot(onRemote, function () {
+      SYNC.db = null;
+      setSyncStatus('error', '⚠️ Sync stopped – saved on this device');
+    });
+  }).catch(function () { setSyncStatus('error', '⚠️ Sync unavailable on this device'); });
+}
+
+/* ---------- Firebase (optional): shared online database with logins ----------
+   Switched on only when firebase-config.js has real values (see FIREBASE-SETUP.md). */
+const FB = { user: null, auth: null, authMod: null, adapter: null, started: false };
+const FIREBASE_VERSION = '10.14.1';
+
+function firebaseConfigured() {
+  const c = typeof window !== 'undefined' ? window.AQUAFARM_FIREBASE : null;
+  return !!(c && c.apiKey && c.projectId && !/^PASTE/.test(c.apiKey) && !/^PASTE/.test(c.projectId));
+}
+
+/* Makes Firestore look like the small database interface used by the sync code above. */
+function makeFirestoreAdapter(fs, fdb) {
+  return {
+    collection: function (name) {
+      const col = fs.collection(fdb, name);
+      return {
+        onSnapshot: function (next, error) {
+          return fs.onSnapshot(col, { includeMetadataChanges: true }, function (snap) {
+            next({
+              docs: snap.docs.map(function (d) { return { id: d.id, exists: true, data: function () { return d.data(); } }; }),
+              metadata: { fromCache: snap.metadata.fromCache, hasPendingWrites: snap.metadata.hasPendingWrites }
+            });
+          }, error);
+        },
+        doc: function (id) {
+          const ref = fs.doc(fdb, name, id);
+          return { set: function (d) { return fs.setDoc(ref, d); }, delete: function () { return fs.deleteDoc(ref); } };
+        }
+      };
+    }
+  };
+}
+
+async function startFirebase() {
+  if (FB.started) return;
+  FB.started = true;
+  setSyncStatus('saving', '☁️ Connecting…');
+  try {
+    const base = 'https://www.gstatic.com/firebasejs/' + FIREBASE_VERSION + '/';
+    const appMod = await import(base + 'firebase-app.js');
+    const authMod = await import(base + 'firebase-auth.js');
+    const fsMod = await import(base + 'firebase-firestore.js');
+    const app = appMod.initializeApp(window.AQUAFARM_FIREBASE);
+    FB.authMod = authMod;
+    FB.auth = authMod.getAuth(app);
+    let fdb;
+    try { fdb = fsMod.initializeFirestore(app, { localCache: fsMod.persistentLocalCache() }); }
+    catch (e) { fdb = fsMod.getFirestore(app); }
+    FB.adapter = makeFirestoreAdapter(fsMod, fdb);
+    authMod.onAuthStateChanged(FB.auth, onFirebaseUser);
+  } catch (e) {
+    FB.started = false;
+    setSyncStatus('error', '⚠️ Could not connect. Check your internet.');
+  }
+}
+
+function renderAccount() {
+  const el = document.getElementById('sync-account');
+  if (!el || !firebaseConfigured()) return;
+  el.innerHTML = FB.user
+    ? 'Signed in as ' + esc(FB.user.email) + '<br><button type="button" data-action="fb-signout">Sign out</button>'
+    : '<button type="button" data-action="fb-login">Sign in to sync</button>';
+}
+
+function onFirebaseUser(user) {
+  FB.user = user;
+  renderAccount();
+  if (SYNC.unsub) { try { SYNC.unsub(); } catch (e) { /* ignore */ } SYNC.unsub = null; }
+  SYNC.ready = false; SYNC.starting = false; SYNC.remote = new Map();
+  if (!user) {
+    SYNC.db = null;
+    setSyncStatus('off', '🔒 Signed out – saved on this device only');
+    showLogin();
+    return;
+  }
+  closeModal();
+  SYNC.db = FB.adapter;
+  setSyncStatus('saving', '☁️ Connecting…');
+  SYNC.unsub = SYNC.db.collection('farm').onSnapshot(onRemote, function (e) {
+    SYNC.db = null;
+    if (e && e.code === 'permission-denied') {
+      setSyncStatus('error', '⚠️ Not allowed – your email is not on the member list');
+      toast('This email is not on the farm’s member list. Ask the owner to add it (see FIREBASE-SETUP.md).', 'error');
+    } else {
+      setSyncStatus('error', '⚠️ Sync stopped – saved on this device');
+    }
+  });
+}
+
+function signInMessage(e) {
+  const code = e && e.code ? e.code : '';
+  if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(code)) return 'The email or password is not correct.';
+  if (code === 'auth/invalid-email') return 'Enter a valid email address.';
+  if (code === 'auth/too-many-requests') return 'Too many attempts. Wait a few minutes and try again.';
+  if (code === 'auth/network-request-failed') return 'No internet connection. Try again when you are online.';
+  return 'Could not sign in (' + (code || 'unknown error') + ').';
+}
+
+function showLogin() {
+  if (!FB.authMod) return;
+  const root = openModal({
+    title: 'Sign in to sync',
+    html: '<p class="muted">Use the email and password the farm owner created for you. Your records keep working on this device if you skip this.</p>' +
+      '<div class="field"><label for="fb-email">Email</label><input type="email" id="fb-email" autocomplete="username" autocapitalize="none" autocorrect="off" inputmode="email"></div>' +
+      '<div class="field"><label for="fb-pass">Password</label><input type="password" id="fb-pass" autocomplete="current-password"></div>' +
+      '<p class="field-error" id="fb-error" role="alert"></p>' +
+      '<div class="form-actions"><button type="button" class="btn" data-modal-close>Not now</button><button type="button" class="btn btn-primary" id="fb-signin">Sign in</button></div>'
+  });
+  async function go() {
+    const email = $('#fb-email', root).value.trim();
+    const pass = $('#fb-pass', root).value;
+    const err = $('#fb-error', root);
+    if (!email || !pass) { err.textContent = 'Enter your email and password.'; return; }
+    err.textContent = '';
+    $('#fb-signin', root).disabled = true;
+    try { await FB.authMod.signInWithEmailAndPassword(FB.auth, email, pass); }
+    catch (e) { err.textContent = signInMessage(e); const b = $('#fb-signin', root); if (b) b.disabled = false; }
+  }
+  $('#fb-signin', root).addEventListener('click', go);
+  $('#fb-pass', root).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+}
+
+function signOutFirebase() {
+  if (FB.authMod && FB.auth) FB.authMod.signOut(FB.auth);
+}
+
 /* Start the app. */
 applyTheme(getSavedTheme());
 render();
+startSync();
 if (!storageWorks) toast('This browser is not allowing saving (Private Browsing?). Records will be lost when you close the page.', 'error');
 if (loadProblem) toast(loadProblem, 'error');
 

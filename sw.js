@@ -1,7 +1,7 @@
 /* AquaFarm service worker: lets the app open without internet once it has been loaded.
    It tries the internet first (so updates arrive automatically) and falls back to saved copies. */
-const CACHE = 'aquafarm-v1';
-const FILES = ['./', './index.html', './style.css', './script.js', './manifest.webmanifest',
+const CACHE = 'aquafarm-v2';
+const FILES = ['./', './index.html', './style.css', './script.js', './firebase-config.js', './manifest.webmanifest',
                './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', function (e) {

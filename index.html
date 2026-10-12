@@ -47,6 +47,8 @@
           <button type="button" data-action="theme" data-mode="dark" data-theme-choice="dark" aria-pressed="false">Dark</button>
         </div>
       </div>
+      <p class="sync-status" id="sync-status" data-state="off">💾 Saved on this device only</p>
+      <div class="sync-account" id="sync-account"></div>
       <p class="sidebar-note">Records are saved in this browser only. Download a backup regularly.</p>
     </aside>
 
@@ -71,6 +73,7 @@
   <!-- Success and error messages appear here -->
   <div id="toasts" aria-live="polite"></div>
 
+  <script src="firebase-config.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

@@ -254,7 +254,7 @@ main { padding: 24px; max-width: 1180px; margin: 0 auto; }
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
 .field > label, .field > span { font-size: 0.9rem; font-weight: 650; }
 input[type="text"], input[type="search"], input[type="number"], input[type="date"],
-input[type="time"], input[type="datetime-local"], input[type="file"], select, textarea {
+input[type="time"], input[type="datetime-local"], input[type="email"], input[type="password"], input[type="file"], select, textarea {
   font: inherit; font-size: 16px; /* 16px stops iPad zooming in on focus */
   width: 100%; min-height: 44px; padding: 9px 12px;
   border: 1px solid var(--input-border); border-radius: var(--radius-sm); background: var(--input-bg); color: var(--text);
@@ -454,3 +454,14 @@ td.clip { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-spa
 }
 :root[data-theme="dark"] .btn-danger-quiet:hover, :root[data-theme="dark"] .btn:hover { color: var(--text); }
 :root[data-theme="dark"] .btn-primary, :root[data-theme="dark"] .btn-danger { color: #fff; }
+
+/* ---------- Sync status (in the menu) ---------- */
+.sync-status { margin: 12px 10px 0; font-size: 0.85rem; font-weight: 600; color: #bfe0e6; }
+.sync-status[data-state="synced"] { color: #8be0b4; }
+.sync-status[data-state="error"] { color: #ffb4ab; }
+
+.sync-account { margin: 6px 10px 0; font-size: 0.82rem; color: #bfe0e6; overflow-wrap: anywhere; }
+.sync-account button {
+  margin-top: 6px; min-height: 40px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer;
+  color: #d4e8ee; background: transparent; border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 8px;
+}
